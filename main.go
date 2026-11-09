@@ -36,8 +36,9 @@ Flags:
   -h, --help         Show this help
   --version          Show the version
 
-Each topic becomes DATE-SLUG.md, a decision diary Claude drafts in the voice of the newest note in
-the folder, and DATE-SLUG.prompt.md, its part of the session: prompts verbatim, Claude's work as a
+Each topic becomes DATE-HHMM-SLUG.md, named for its first prompt, a decision diary Claude drafts in
+the voice of the newest note in the folder, and DATE-HHMM-SLUG.prompt.md, its part of the session:
+prompts verbatim, Claude's work as a
 count of its tool calls, and the questions it asked you. vibelog never overwrites a file and needs the claude command for the drafts.
 
 Names to hide go in ~/.config/vibelog/redact.txt, one "name => [replacement]" per line. Your home
@@ -95,8 +96,6 @@ func run(args []string) int {
 		report(err)
 		return 1
 	}
-	day := sess.started.Local().Format(time.DateOnly)
-
 	topics := []topic{{title: sess.aiTitle, prompts: sess.allPrompts()}}
 	if !*transcriptOnly {
 		fmt.Fprintln(os.Stderr, "Splitting the session into topics with Claude.")
@@ -153,8 +152,10 @@ func run(args []string) int {
 			slug = fmt.Sprintf("%s-%d", base, n)
 		}
 		used[slug] = true
-		outs[i].note = filepath.Join(out, day+"-"+slug+".md")
-		outs[i].prompt = filepath.Join(out, day+"-"+slug+".prompt.md")
+		// The day and time of the topic's first prompt, so the site lists a day's notes in order.
+		stamp := sess.startOf(topics[i].prompts).Local().Format(time.DateOnly + "-1504")
+		outs[i].note = filepath.Join(out, stamp+"-"+slug+".md")
+		outs[i].prompt = filepath.Join(out, stamp+"-"+slug+".prompt.md")
 	}
 
 	if *dryRun {

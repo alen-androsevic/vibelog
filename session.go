@@ -141,10 +141,12 @@ type step struct {
 
 type claudeSession struct {
 	started time.Time
-	aiTitle string
-	steps   []step
-	outputs map[string]string
-	prompts int
+	// promptAt holds when each prompt was sent; prompt n is promptAt[n-1].
+	promptAt []time.Time
+	aiTitle  string
+	steps    []step
+	outputs  map[string]string
+	prompts  int
 }
 
 func readSession(file string) (*claudeSession, error) {
@@ -244,7 +246,22 @@ func (s *claudeSession) addUser(e entry, text string) {
 		s.started = e.Timestamp
 	}
 	s.prompts++
+	s.promptAt = append(s.promptAt, e.Timestamp)
 	s.steps = append(s.steps, step{kind: "prompt", text: text})
+}
+
+// startOf is when the first of the given prompts was sent, or the session's start without one.
+func (s *claudeSession) startOf(prompts []int) time.Time {
+	var at time.Time
+	for _, n := range prompts {
+		if n >= 1 && n <= len(s.promptAt) && (at.IsZero() || s.promptAt[n-1].Before(at)) {
+			at = s.promptAt[n-1]
+		}
+	}
+	if at.IsZero() {
+		return s.started
+	}
+	return at
 }
 
 func resultText(b block) string {

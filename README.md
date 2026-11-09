@@ -12,12 +12,13 @@ vibelog ~/code/acme/api --dry-run # show the notes for that project's newest ses
 ## What it writes
 
 Claude splits the session into topics, such as building a product and building a tool. Each topic
-gets two files:
+gets two files, named for the day and time of its first prompt (`2026-11-09-1430-a-slug`), so the
+site lists the notes of one day in order:
 
-- `DATE-SLUG.md`: a decision diary Claude drafts. What runs now, the choices and why, how Claude
+- `DATE-HHMM-SLUG.md`: a decision diary Claude drafts. What runs now, the choices and why, how Claude
   was used, what to tell someone starting the same, what's next. It copies the voice of the newest
   note in the folder.
-- `DATE-SLUG.prompt.md`: that part of the session, kept short. Your prompts are verbatim; Claude's
+- `DATE-HHMM-SLUG.prompt.md`: that part of the session, kept short. Your prompts are verbatim; Claude's
   work shows as a line like "Claude pondering" with a count of its tool calls ("14 tool calls: 6
   commands, 4 reads, 3 edits, 1 web search"). Its text is left out, except the questions it asked
   you. The draft is still written from the full session.
