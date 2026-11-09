@@ -37,8 +37,8 @@ Flags:
   --version          Show the version
 
 Each topic becomes DATE-SLUG.md, a decision diary Claude drafts in the voice of the newest note in
-the folder, and DATE-SLUG.prompt.md, its part of the session: prompts verbatim, tool output cut to
-6 lines. vibelog never overwrites a file and needs the claude command for the drafts.
+the folder, and DATE-SLUG.prompt.md, its part of the session: prompts verbatim, Claude's work as a
+count of its tool calls, and the questions it asked you. vibelog never overwrites a file and needs the claude command for the drafts.
 
 Names to hide go in ~/.config/vibelog/redact.txt, one "name => [replacement]" per line. Your home
 folder, email addresses and common secret formats are always replaced.
@@ -113,14 +113,15 @@ func run(args []string) int {
 	errs := make([]error, len(topics))
 	var wg sync.WaitGroup
 	for i, t := range topics {
-		outs[i] = output{title: t.title, transcript: red.apply(sess.transcriptFor(t.prompts))}
+		// The .prompt.md gets the brief transcript; Claude drafts from the full one.
+		outs[i] = output{title: t.title, transcript: red.apply(sess.briefFor(t.prompts))}
 		if *transcriptOnly {
 			continue
 		}
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			note, err := writeNote(out, outs[i].transcript)
+			note, err := writeNote(out, red.apply(sess.transcriptFor(t.prompts)))
 			if err != nil {
 				errs[i] = err
 				return

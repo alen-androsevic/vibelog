@@ -17,8 +17,10 @@ gets two files:
 - `DATE-SLUG.md`: a decision diary Claude drafts. What runs now, the choices and why, how Claude
   was used, what to tell someone starting the same, what's next. It copies the voice of the newest
   note in the folder.
-- `DATE-SLUG.prompt.md`: that part of the session as the terminal printed it. Prompts are verbatim;
-  tool output is cut to 6 lines.
+- `DATE-SLUG.prompt.md`: that part of the session, kept short. Your prompts are verbatim; Claude's
+  work shows as a line like "Claude pondering" with a count of its tool calls ("14 tool calls: 6
+  commands, 4 reads, 3 edits, 1 web search"). Its text is left out, except the questions it asked
+  you. The draft is still written from the full session.
 
 It takes about 2 minutes, never overwrites a file and needs the `claude` command on your PATH.
 Read both files before you publish.

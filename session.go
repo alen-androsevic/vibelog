@@ -6,11 +6,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"hash/fnv"
 	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -18,7 +20,7 @@ import (
 
 // Reading a Claude Code session, redacting it, and asking Claude for the notes.
 
-// outputLines is how much of a tool's output the transcript keeps.
+// outputLines is how much of a tool's output the full transcript, the one Claude drafts from, keeps.
 const outputLines = 6
 
 // skippedTools are tool calls that only load other tools; they say nothing about the work.
@@ -133,6 +135,8 @@ type step struct {
 	kind   string // prompt, say, tool, out
 	text   string
 	toolID string
+	tool   string   // the tool's name, for counting
+	asks   []string // the questions of an AskUserQuestion call
 }
 
 type claudeSession struct {
@@ -191,7 +195,7 @@ func readSession(file string) (*claudeSession, error) {
 					}
 				case "tool_use":
 					if !skippedTools[b.Name] {
-						s.steps = append(s.steps, step{kind: "tool", text: toolLine(b), toolID: b.ID})
+						s.steps = append(s.steps, step{kind: "tool", text: toolLine(b), toolID: b.ID, tool: b.Name, asks: questions(b)})
 					}
 				}
 			}
@@ -363,6 +367,193 @@ func (s *claudeSession) transcriptFor(prompts []int) string {
 			}
 			indent(strings.Join(lines, "\n"), "  ⎿  ", "     ")
 		}
+	}
+	return b.String()
+}
+
+// questions are the questions of an AskUserQuestion call; nil for any other tool.
+func questions(b block) []string {
+	if b.Name != "AskUserQuestion" {
+		return nil
+	}
+	var in struct {
+		Questions []struct {
+			Question string `json:"question"`
+		} `json:"questions"`
+	}
+	json.Unmarshal(b.Input, &in)
+	var qs []string
+	for _, q := range in.Questions {
+		if q := strings.TrimSpace(q.Question); q != "" {
+			qs = append(qs, q)
+		}
+	}
+	return qs
+}
+
+// workWords are the words Claude Code shows while it works.
+var workWords = []string{
+	"accomplishing", "actualizing", "baking", "brewing", "calculating", "cerebrating", "churning",
+	"clauding", "coalescing", "cogitating", "computing", "conjuring", "considering", "cooking",
+	"crafting", "creating", "crunching", "deliberating", "determining", "doing", "effecting",
+	"finagling", "forging", "forming", "generating", "hatching", "herding", "honking", "hustling",
+	"ideating", "inferring", "manifesting", "marinating", "moseying", "mulling", "mustering",
+	"musing", "noodling", "percolating", "pondering", "processing", "puttering", "reticulating",
+	"ruminating", "schlepping", "shucking", "simmering", "smooshing", "spinning", "stewing",
+	"synthesizing", "thinking", "transmuting", "vibing", "working",
+}
+
+// workWord picks a word from the prompt, so a dry run and the real run print the same one.
+func workWord(prompt string, n int) string {
+	h := fnv.New32a()
+	fmt.Fprintf(h, "%d %s", n, prompt)
+	return workWords[h.Sum32()%uint32(len(workWords))]
+}
+
+// toolKinds are the counts the brief transcript shows, in this order. Tools not listed count as
+// "other".
+var toolKinds = []struct {
+	one, many string
+	tools     []string
+}{
+	{"command", "commands", []string{"Bash"}},
+	{"read", "reads", []string{"Read"}},
+	{"search", "searches", []string{"Grep", "Glob"}},
+	{"edit", "edits", []string{"Edit", "Write", "MultiEdit", "NotebookEdit"}},
+	{"web search", "web searches", []string{"WebSearch"}},
+	{"page fetched", "pages fetched", []string{"WebFetch"}},
+	{"agent", "agents", []string{"Agent", "Task"}},
+	{"skill", "skills", []string{"Skill"}},
+	{"other", "other", nil},
+}
+
+// countLine sums up tool calls: "14 tool calls: 6 commands, 4 reads, 3 edits, 1 web search".
+func countLine(tools []string) string {
+	counts := make([]int, len(toolKinds))
+	for _, t := range tools {
+		k := len(toolKinds) - 1
+		for i, kind := range toolKinds {
+			if slices.Contains(kind.tools, t) {
+				k = i
+				break
+			}
+		}
+		counts[k]++
+	}
+	var parts []string
+	for i, n := range counts {
+		switch {
+		case n == 1:
+			parts = append(parts, "1 "+toolKinds[i].one)
+		case n > 1:
+			parts = append(parts, fmt.Sprintf("%d %s", n, toolKinds[i].many))
+		}
+	}
+	if len(parts) == 1 {
+		return parts[0]
+	}
+	return fmt.Sprintf("%d tool calls: %s", len(tools), strings.Join(parts, ", "))
+}
+
+var answer = regexp.MustCompile(`"([^"]*)"="([^"]*)"`)
+
+// askedLines are the lines of Claude's text that ask something: the questions it ends a turn on.
+func askedLines(text string) string {
+	var out []string
+	for _, line := range strings.Split(text, "\n") {
+		if strings.HasSuffix(strings.TrimRight(line, " *_)"), "?") {
+			out = append(out, strings.TrimSpace(line))
+		}
+	}
+	return strings.Join(out, "\n")
+}
+
+// briefFor is what the .prompt.md publishes: the given prompts verbatim and, after each, a line
+// that Claude worked with the count of its tool calls. Claude's text is left out, except the
+// questions it asked: an AskUserQuestion with its answer, and the questions it ended a turn on.
+func (s *claudeSession) briefFor(prompts []int) string {
+	keep := map[int]bool{}
+	for _, n := range prompts {
+		keep[n] = true
+	}
+	var b strings.Builder
+	b.WriteString("Generated from a Claude Code session. Prompts are verbatim; Claude's work is counted,\n")
+	b.WriteString("not shown, except the questions it asked. Names in [brackets] are redacted.\n")
+	block := func(text, first, rest string) {
+		b.WriteString("\n")
+		for i, line := range strings.Split(text, "\n") {
+			switch {
+			case strings.TrimSpace(line) == "":
+				b.WriteString("\n")
+			case i == 0:
+				b.WriteString(first + line + "\n")
+			default:
+				b.WriteString(rest + line + "\n")
+			}
+		}
+	}
+
+	n, segment := 0, 0
+	var prompt, lastSay string
+	var tools []string
+	worked := false
+	// flush writes the work since the prompt or the last question, if there was any.
+	flush := func() {
+		if worked {
+			segment++
+			block("Claude "+workWord(prompt, segment), "⏺ ", "  ")
+			if len(tools) > 0 {
+				b.WriteString("  ⎿  " + countLine(tools) + "\n")
+			}
+		}
+		tools, worked = nil, false
+	}
+	// end closes a prompt's turn, with the questions Claude ended it on.
+	end := func() {
+		flush()
+		if q := askedLines(lastSay); q != "" {
+			block(q, "⏺ ", "  ")
+		}
+		lastSay = ""
+	}
+	for _, st := range s.steps {
+		if st.kind == "prompt" {
+			if keep[max(n, 1)] {
+				end()
+			}
+			n++
+			prompt, segment = st.text, 0
+		}
+		if !keep[max(n, 1)] {
+			continue
+		}
+		switch {
+		case st.kind == "prompt":
+			block(st.text, "> ", "  ")
+		case st.kind == "say":
+			worked, lastSay = true, st.text
+		case st.kind == "out":
+			flush()
+			lastSay = ""
+			block(st.text, "  ⎿  ", "     ")
+		case len(st.asks) > 0:
+			flush()
+			lastSay = ""
+			block(strings.Join(st.asks, "\n"), "⏺ ", "  ")
+			var got []string
+			for _, m := range answer.FindAllStringSubmatch(s.outputs[st.toolID], -1) {
+				got = append(got, m[2])
+			}
+			if len(got) > 0 {
+				b.WriteString("  ⎿  " + strings.Join(got, "\n     ") + "\n")
+			}
+		default:
+			worked, lastSay = true, ""
+			tools = append(tools, st.tool)
+		}
+	}
+	if keep[max(n, 1)] {
+		end()
 	}
 	return b.String()
 }
