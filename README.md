@@ -5,9 +5,11 @@ Turns a Claude Code session into notes you can publish: one per topic, each with
 A log of your vibe-coding sessions, kept the way `git log` keeps commits.
 
 ```sh
-go install .                      # from this folder; puts vibelog in ~/go/bin
-vibelog ~/code/acme/api --dry-run # show the notes for that project's newest session
+go install github.com/alen-androsevic/vibelog@latest  # puts vibelog in ~/go/bin
+vibelog ~/code/acme/api --dry-run                     # show the notes for that project's newest session
 ```
+
+It needs Go 1.27 or newer. From a clone, `go install .` does the same.
 
 ## What it writes
 
@@ -53,3 +55,7 @@ secret formats (GitHub, GitLab, Slack, AWS, Anthropic keys and private keys) are
 | `--dry-run` | Print everything, write nothing |
 | `--transcript-only` | One transcript for the whole session; no split, no draft |
 | `--json` | Print the written files as JSON on stdout |
+
+## License
+
+MIT, see [LICENSE](LICENSE).
