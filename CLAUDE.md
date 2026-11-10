@@ -12,6 +12,9 @@ The code has no comments; names and tests carry the meaning. Keep it that way.
 The `.prompt.md` format is also read by the note viewer on https://alen.andronewille.eu, the
 author's site. Change it in both places or not at all.
 
+A release gets a CHANGELOG.md entry, `version` in `main.go` to match, a `vX.Y.Z` tag and a GitHub
+release with the entry as its notes.
+
 ## Commands
 
 - `go install .`: build and install to `~/go/bin/vibelog`.
