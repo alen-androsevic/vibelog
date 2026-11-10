@@ -1,3 +1,8 @@
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="assets/icon-dark.svg">
+  <img alt="" src="assets/icon-light.svg" width="96">
+</picture>
+
 # vibelog
 
 Turns a Claude Code session into notes you can publish: one per topic, each with the session beside it.
