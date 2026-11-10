@@ -1,3 +1,3 @@
 module github.com/alen-androsevic/vibelog
 
-go 1.27.3
+go 1.22

@@ -18,21 +18,15 @@ import (
 	"time"
 )
 
-// Reading a Claude Code session, redacting it, and asking Claude for the notes.
-
-// outputLines is how much of a tool's output the full transcript, the one Claude drafts from, keeps.
 const outputLines = 6
 
-// skippedTools are tool calls that only load other tools; they say nothing about the work.
 var skippedTools = map[string]bool{"ToolSearch": true, "TodoWrite": true}
 
-// output is one note of a run: its transcript and, unless --transcript-only, Claude's draft.
 type output struct {
 	title, body, transcript string
 	note, prompt            string
 }
 
-// topic is a group of prompts, numbered from 1, that belong in one note.
 type topic struct {
 	title   string
 	prompts []int
@@ -48,11 +42,10 @@ func projectsDir() string {
 
 var nonAlnum = regexp.MustCompile(`[^A-Za-z0-9]`)
 
-// findSession resolves the argument: a .jsonl file, a project folder (its newest session), or
-// nothing (the newest session of any project).
 func findSession(arg string) (string, error) {
 	root := projectsDir()
 	if strings.HasSuffix(arg, ".jsonl") {
+		arg = expandHome(arg)
 		if _, err := os.Stat(arg); err != nil {
 			return "", fmt.Errorf("can't read %s", arg)
 		}
@@ -75,7 +68,6 @@ func findSession(arg string) (string, error) {
 		if err != nil {
 			return nil
 		}
-		// Sessions sit directly in a project folder; deeper files belong to subagents.
 		if d.IsDir() && p != dir && filepath.Dir(p) != root {
 			return filepath.SkipDir
 		}
@@ -104,7 +96,6 @@ func expandHome(p string) string {
 	return p
 }
 
-// A line of the session file. Only the fields the transcript needs.
 type entry struct {
 	Type        string    `json:"type"`
 	IsSidechain bool      `json:"isSidechain"`
@@ -130,18 +121,16 @@ type block struct {
 	IsError   bool            `json:"is_error"`
 }
 
-// step is one thing that happened, in order.
 type step struct {
-	kind   string // prompt, say, tool, out
+	kind   string
 	text   string
 	toolID string
-	tool   string   // the tool's name, for counting
-	asks   []string // the questions of an AskUserQuestion call
+	tool   string
+	asks   []string
 }
 
 type claudeSession struct {
-	started time.Time
-	// promptAt holds when each prompt was sent; prompt n is promptAt[n-1].
+	started  time.Time
 	promptAt []time.Time
 	aiTitle  string
 	steps    []step
@@ -250,7 +239,6 @@ func (s *claudeSession) addUser(e entry, text string) {
 	s.steps = append(s.steps, step{kind: "prompt", text: text})
 }
 
-// startOf is when the first of the given prompts was sent, or the session's start without one.
 func (s *claudeSession) startOf(prompts []int) time.Time {
 	var at time.Time
 	for _, n := range prompts {
@@ -283,7 +271,6 @@ func resultText(b block) string {
 	return strings.TrimSpace(systemNote.ReplaceAllString(text, ""))
 }
 
-// toolLine writes a tool call the way the terminal shows it: Name(the one argument that matters).
 func toolLine(b block) string {
 	var in map[string]any
 	json.Unmarshal(b.Input, &in)
@@ -332,9 +319,6 @@ func (s *claudeSession) allPrompts() []int {
 	return all
 }
 
-// transcriptFor prints the given prompts, and everything after each up to the next prompt, in
-// the format the note viewer reads: "> " a prompt, "⏺ " Claude's text or a tool call, "⎿" its
-// output, indented lines continue the block above.
 func (s *claudeSession) transcriptFor(prompts []int) string {
 	keep := map[int]bool{}
 	for _, n := range prompts {
@@ -388,7 +372,6 @@ func (s *claudeSession) transcriptFor(prompts []int) string {
 	return b.String()
 }
 
-// questions are the questions of an AskUserQuestion call; nil for any other tool.
 func questions(b block) []string {
 	if b.Name != "AskUserQuestion" {
 		return nil
@@ -408,7 +391,6 @@ func questions(b block) []string {
 	return qs
 }
 
-// workWords are the words Claude Code shows while it works.
 var workWords = []string{
 	"accomplishing", "actualizing", "baking", "brewing", "calculating", "cerebrating", "churning",
 	"clauding", "coalescing", "cogitating", "computing", "conjuring", "considering", "cooking",
@@ -420,15 +402,12 @@ var workWords = []string{
 	"synthesizing", "thinking", "transmuting", "vibing", "working",
 }
 
-// workWord picks a word from the prompt, so a dry run and the real run print the same one.
 func workWord(prompt string, n int) string {
 	h := fnv.New32a()
 	fmt.Fprintf(h, "%d %s", n, prompt)
 	return workWords[h.Sum32()%uint32(len(workWords))]
 }
 
-// toolKinds are the counts the brief transcript shows, in this order. Tools not listed count as
-// "other".
 var toolKinds = []struct {
 	one, many string
 	tools     []string
@@ -444,7 +423,6 @@ var toolKinds = []struct {
 	{"other", "other", nil},
 }
 
-// countLine sums up tool calls: "14 tool calls: 6 commands, 4 reads, 3 edits, 1 web search".
 func countLine(tools []string) string {
 	counts := make([]int, len(toolKinds))
 	for _, t := range tools {
@@ -474,7 +452,6 @@ func countLine(tools []string) string {
 
 var answer = regexp.MustCompile(`"([^"]*)"="([^"]*)"`)
 
-// askedLines are the lines of Claude's text that ask something: the questions it ends a turn on.
 func askedLines(text string) string {
 	var out []string
 	for _, line := range strings.Split(text, "\n") {
@@ -485,9 +462,6 @@ func askedLines(text string) string {
 	return strings.Join(out, "\n")
 }
 
-// briefFor is what the .prompt.md publishes: the given prompts verbatim and, after each, a line
-// that Claude worked with the count of its tool calls. Claude's text is left out, except the
-// questions it asked: an AskUserQuestion with its answer, and the questions it ended a turn on.
 func (s *claudeSession) briefFor(prompts []int) string {
 	keep := map[int]bool{}
 	for _, n := range prompts {
@@ -514,7 +488,6 @@ func (s *claudeSession) briefFor(prompts []int) string {
 	var prompt, lastSay string
 	var tools []string
 	worked := false
-	// flush writes the work since the prompt or the last question, if there was any.
 	flush := func() {
 		if worked {
 			segment++
@@ -525,7 +498,6 @@ func (s *claudeSession) briefFor(prompts []int) string {
 		}
 		tools, worked = nil, false
 	}
-	// end closes a prompt's turn, with the questions Claude ended it on.
 	end := func() {
 		flush()
 		if q := askedLines(lastSay); q != "" {
@@ -575,8 +547,6 @@ func (s *claudeSession) briefFor(prompts []int) string {
 	return b.String()
 }
 
-// redactions replace what must not be published. The built-in ones cover the home folder,
-// email addresses and common secret formats; the file adds names, one per line.
 type redactions struct {
 	pairs []redaction
 }
@@ -586,8 +556,6 @@ type redaction struct {
 	with string
 }
 
-// redactFile is ~/.config/vibelog/redact.txt, outside any repo: the list itself names what must
-// stay private.
 func redactFile() string { return filepath.Join(configDir(), "redact.txt") }
 
 func loadRedactions() (*redactions, error) {
@@ -595,31 +563,29 @@ func loadRedactions() (*redactions, error) {
 	add := func(pattern, with string) {
 		r.pairs = append(r.pairs, redaction{regexp.MustCompile(pattern), with})
 	}
-	add(`(?:ghp_|github_pat_|glpat-|gho_|xox[abp]-|sk-ant-|sk-)[A-Za-z0-9_\-]{16,}`, "[secret]")
-	add(`AKIA[0-9A-Z]{16}`, "[secret]")
+	add(`\b(?:ghp_|github_pat_|glpat-|gho_|xox[abp]-|sk-ant-|sk-)[A-Za-z0-9_\-]{16,}`, "[secret]")
+	add(`\bAKIA[0-9A-Z]{16}`, "[secret]")
 	add(`(?s)-----BEGIN [A-Z ]*PRIVATE KEY-----.*?-----END [A-Z ]*PRIVATE KEY-----`, "[secret]")
 	add(`[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}`, "[email]")
-	add(`/private/tmp/claude-\d+/\S*`, "[tmp]")
+	add(`(?:/private)?/tmp/claude-\d+/\S*`, "[tmp]")
 
-	var user []redaction
-	if path := redactFile(); path != "" {
-		raw, err := os.ReadFile(path)
-		if err != nil && !errors.Is(err, fs.ErrNotExist) {
-			return nil, err
-		}
-		for n, line := range strings.Split(string(raw), "\n") {
-			line = strings.TrimSpace(line)
-			if line == "" || strings.HasPrefix(line, "#") {
-				continue
-			}
-			find, with, ok := strings.Cut(line, "=>")
-			if !ok || strings.TrimSpace(find) == "" {
-				return nil, fmt.Errorf("%s:%d: write it as `name => [replacement]`", path, n+1)
-			}
-			user = append(user, redaction{regexp.MustCompile(`(?i)` + regexp.QuoteMeta(strings.TrimSpace(find))), strings.TrimSpace(with)})
-		}
+	path := redactFile()
+	raw, err := os.ReadFile(path)
+	if err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return nil, err
 	}
-	// Longer names first, so "Acme Cloud" goes before "Acme".
+	var user []redaction
+	for n, line := range strings.Split(string(raw), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		find, with, ok := strings.Cut(line, "=>")
+		if !ok || strings.TrimSpace(find) == "" {
+			return nil, fmt.Errorf("%s:%d: write it as `name => [replacement]`", path, n+1)
+		}
+		user = append(user, redaction{regexp.MustCompile(`(?i)` + regexp.QuoteMeta(strings.TrimSpace(find))), strings.TrimSpace(with)})
+	}
 	sort.SliceStable(user, func(i, j int) bool { return len(user[i].find.String()) > len(user[j].find.String()) })
 	r.pairs = append(r.pairs, user...)
 
@@ -656,7 +622,6 @@ Answer with JSON only, no other text:
 {"topics": [{"title": "working title", "prompts": [1, 2, 3]}]}
 `
 
-// splitTopics asks Claude which prompts belong together. Text in [brackets] is already redacted.
 func splitTopics(s *claudeSession, red *redactions) ([]topic, error) {
 	if s.prompts == 1 {
 		return []topic{{title: s.aiTitle, prompts: []int{1}}}, nil
@@ -744,8 +709,6 @@ Rules:
 - Output only the markdown of the note, nothing before or after it.
 `
 
-// writeNote asks Claude Code, without tools and without saving a session, for the note. The
-// newest note on the site goes along as the example of the voice.
 func writeNote(out, transcript string) (string, error) {
 	var prompt strings.Builder
 	prompt.WriteString(notePrompt)
@@ -763,7 +726,6 @@ func writeNote(out, transcript string) (string, error) {
 		return "", err
 	}
 	note := strings.TrimSpace(out)
-	// Drop a code fence around the whole note, if Claude added one.
 	if strings.HasPrefix(note, "```") && strings.HasSuffix(note, "```") {
 		_, note, _ = strings.Cut(note, "\n")
 		note = strings.TrimSuffix(note, "```")
@@ -771,8 +733,6 @@ func writeNote(out, transcript string) (string, error) {
 	return strings.TrimSpace(note) + "\n", nil
 }
 
-// askClaude runs Claude Code headless, without tools and without saving a session, so a run
-// doesn't become the newest session itself.
 func askClaude(prompt string) (string, error) {
 	if _, err := exec.LookPath("claude"); err != nil {
 		return "", errors.New("the `claude` command isn't on your PATH. Install Claude Code, or run with --transcript-only")
@@ -791,7 +751,6 @@ func askClaude(prompt string) (string, error) {
 	return out.String(), nil
 }
 
-// newestNote is the newest note in the output folder, so every note sounds like the last one.
 func newestNote(out string) string {
 	entries, err := os.ReadDir(out)
 	if err != nil {

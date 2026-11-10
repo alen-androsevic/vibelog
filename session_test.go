@@ -7,7 +7,6 @@ import (
 	"testing"
 )
 
-// A session with one prompt: Claude says something, runs a command, and ends on a question.
 const sessionJSONL = `{"type":"user","origin":{"kind":"human"},"timestamp":"2026-11-09T14:30:00Z","message":{"content":"fix the bug"}}
 {"type":"assistant","message":{"content":[{"type":"text","text":"Looking."},{"type":"tool_use","id":"t1","name":"Bash","input":{"command":"go test ./..."}}]}}
 {"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"t1","content":"ok\nPASS"}]}}
@@ -28,7 +27,6 @@ func testSession(t *testing.T) *claudeSession {
 	return s
 }
 
-// afterHeader drops the lines every transcript starts with.
 func afterHeader(t *testing.T, transcript string) string {
 	t.Helper()
 	_, body, ok := strings.Cut(transcript, "are redacted.\n")
@@ -105,5 +103,18 @@ func TestRedactionsRejectsBadLine(t *testing.T) {
 	}
 	if _, err := loadRedactions(); err == nil || !strings.Contains(err.Error(), "redact.txt:1") {
 		t.Errorf("err = %v, want one naming redact.txt:1", err)
+	}
+}
+
+func TestRedactionsKeepsWords(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	red, err := loadRedactions()
+	if err != nil {
+		t.Fatal(err)
+	}
+	in := "the task-runner-configuration in /tmp/claude-501/abc/out.txt"
+	want := "the task-runner-configuration in [tmp]"
+	if got := red.apply(in); got != want {
+		t.Errorf("apply:\n got %q\nwant %q", got, want)
 	}
 }

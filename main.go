@@ -1,5 +1,3 @@
-// Command vibelog turns a Claude Code session into notes you can publish: one per topic, each a
-// decision diary with the session beside it as a .prompt.md.
 package main
 
 import (
@@ -17,32 +15,43 @@ import (
 
 const version = "0.1.0"
 
-const usage = `vibelog turns a Claude Code session into notes, one per topic, with the session beside each.
+const usage = `vibelog turns a Claude Code session into notes, one per topic, with the
+session beside each.
 
 Examples:
   vibelog ~/code/acme/api              Notes from that project's newest session
-  vibelog --dry-run                    Show the notes for your newest session anywhere, write nothing
+  vibelog --dry-run                    Show the notes for your newest session,
+                                       write nothing
   vibelog ~/code/acme/api --out notes  Write them into ./notes
 
 Usage:
-  vibelog [PROJECT | SESSION.jsonl] [--out DIR] [--dry-run] [--transcript-only] [--json]
+  vibelog [PROJECT | SESSION.jsonl] [--out DIR] [--dry-run] [--transcript-only]
+          [--json]
 
 Flags:
-  --out DIR          Folder for the notes. Default: "out" in ~/.config/vibelog/config, else
-                     ./notes when it exists, else the current folder
+  --out DIR          Folder for the notes. Default: $VIBELOG_OUT, else "out" in
+                     ~/.config/vibelog/config, else ./notes when it exists,
+                     else the current folder
   --dry-run          Print the notes and transcripts, write nothing
-  --transcript-only  Write one transcript for the whole session; no split, no draft
+  --transcript-only  Write one transcript for the whole session; no split, no
+                     draft
   --json             Print the written files as JSON on stdout
   -h, --help         Show this help
   --version          Show the version
 
-Each topic becomes DATE-HHMM-SLUG.md, named for its first prompt, a decision diary Claude drafts in
-the voice of the newest note in the folder, and DATE-HHMM-SLUG.prompt.md, its part of the session:
-prompts verbatim, Claude's work as a
-count of its tool calls, and the questions it asked you. vibelog never overwrites a file and needs the claude command for the drafts.
+Each topic becomes two files, named for the day and time of its first prompt:
+  DATE-HHMM-SLUG.md         A decision diary Claude drafts, in the voice of the
+                            newest note in the folder
+  DATE-HHMM-SLUG.prompt.md  Its part of the session: your prompts verbatim,
+                            Claude's work as a count of its tool calls, and the
+                            questions it asked you
 
-Names to hide go in ~/.config/vibelog/redact.txt, one "name => [replacement]" per line. Your home
-folder, email addresses and common secret formats are always replaced.
+vibelog never overwrites a file. The drafts need the claude command on your
+PATH, and the redacted session goes to Claude through it.
+
+Names to hide go in ~/.config/vibelog/redact.txt, one "name => [replacement]"
+per line. Your home folder, email addresses and common secret formats are
+always replaced.
 `
 
 var noteName = regexp.MustCompile(`^(\d{4}-\d{2}-\d{2})-([a-z0-9]+(?:-[a-z0-9]+)*)\.md$`)
@@ -107,12 +116,10 @@ func run(args []string) int {
 		fmt.Fprintf(os.Stderr, "Writing %d note(s) with Claude; this takes about 2 minutes.\n", len(topics))
 	}
 
-	// Each topic gets its transcript and, unless --transcript-only, a draft. Drafts run in parallel.
 	outs := make([]output, len(topics))
 	errs := make([]error, len(topics))
 	var wg sync.WaitGroup
 	for i, t := range topics {
-		// The .prompt.md gets the brief transcript; Claude drafts from the full one.
 		outs[i] = output{title: t.title, transcript: red.apply(sess.briefFor(t.prompts))}
 		if *transcriptOnly {
 			continue
@@ -152,7 +159,6 @@ func run(args []string) int {
 			slug = fmt.Sprintf("%s-%d", base, n)
 		}
 		used[slug] = true
-		// The day and time of the topic's first prompt, so the site lists a day's notes in order.
 		stamp := sess.startOf(topics[i].prompts).Local().Format(time.DateOnly + "-1504")
 		outs[i].note = filepath.Join(out, stamp+"-"+slug+".md")
 		outs[i].prompt = filepath.Join(out, stamp+"-"+slug+".prompt.md")
@@ -167,7 +173,6 @@ func run(args []string) int {
 		}
 		return 0
 	}
-	// Check every target before writing any, so a run writes all its files or none.
 	var targets []string
 	for _, o := range outs {
 		targets = append(targets, o.prompt)
@@ -214,7 +219,6 @@ func run(args []string) int {
 	return 0
 }
 
-// reorder puts flags before the positional argument, so `vibelog ~/code/x --dry-run` works too.
 func reorder(args []string) []string {
 	var flags, rest []string
 	for i := 0; i < len(args); i++ {
@@ -244,8 +248,6 @@ func configDir() string {
 	return filepath.Join(dir, "vibelog")
 }
 
-// outDir picks the folder for the notes: the flag, then VIBELOG_OUT, then "out = DIR" in
-// ~/.config/vibelog/config, then ./notes when it exists, then the current folder.
 func outDir(flagValue string) (string, error) {
 	if flagValue != "" {
 		return expandHome(flagValue), nil
