@@ -105,23 +105,60 @@ func run(args []string) int {
 		report(err)
 		return 1
 	}
-	topics := []topic{{title: sess.aiTitle, prompts: sess.allPrompts()}}
-	if !*transcriptOnly {
-		fmt.Fprintln(os.Stderr, "Splitting the session into topics with Claude.")
-		if split, err := splitTopics(sess, red); err != nil {
-			fmt.Fprintf(os.Stderr, "Keeping one note: %v\n", err)
-		} else {
-			topics = split
-		}
-		fmt.Fprintf(os.Stderr, "Writing %d note(s) with Claude; this takes about 2 minutes.\n", len(topics))
+	topics := pickTopics(sess, red, *transcriptOnly)
+	outs, err := draftNotes(out, sess, red, topics, *transcriptOnly)
+	if err != nil {
+		report(err)
+		return 1
 	}
+	nameFiles(out, sess, red, topics, outs)
 
+	if *dryRun {
+		printAll(outs)
+		return 0
+	}
+	targets, err := writeFiles(out, outs)
+	if err != nil {
+		report(err)
+		return 1
+	}
+	if *asJSON {
+		var notes []map[string]any
+		for _, o := range outs {
+			notes = append(notes, map[string]any{"note": o.note, "prompt": o.prompt, "noteWritten": o.body != ""})
+		}
+		json.NewEncoder(os.Stdout).Encode(map[string]any{"session": file, "notes": notes})
+		return 0
+	}
+	for _, p := range targets {
+		fmt.Println(p)
+	}
+	fmt.Fprintln(os.Stderr, "Read them before you publish: check names, numbers and the summary lines.")
+	return 0
+}
+
+func pickTopics(sess *claudeSession, red *redactions, transcriptOnly bool) []topic {
+	topics := []topic{{title: sess.aiTitle, prompts: sess.allPrompts()}}
+	if transcriptOnly {
+		return topics
+	}
+	fmt.Fprintln(os.Stderr, "Splitting the session into topics with Claude.")
+	if split, err := splitTopics(sess, red); err != nil {
+		fmt.Fprintf(os.Stderr, "Keeping one note: %v\n", err)
+	} else {
+		topics = split
+	}
+	fmt.Fprintf(os.Stderr, "Writing %d note(s) with Claude; this takes about 2 minutes.\n", len(topics))
+	return topics
+}
+
+func draftNotes(out string, sess *claudeSession, red *redactions, topics []topic, transcriptOnly bool) ([]output, error) {
 	outs := make([]output, len(topics))
 	errs := make([]error, len(topics))
 	var wg sync.WaitGroup
 	for i, t := range topics {
 		outs[i] = output{title: t.title, transcript: red.apply(sess.briefFor(t.prompts))}
-		if *transcriptOnly {
+		if transcriptOnly {
 			continue
 		}
 		wg.Add(1)
@@ -143,11 +180,10 @@ func run(args []string) int {
 		}()
 	}
 	wg.Wait()
-	if err := errors.Join(errs...); err != nil {
-		report(err)
-		return 1
-	}
+	return outs, errors.Join(errs...)
+}
 
+func nameFiles(out string, sess *claudeSession, red *redactions, topics []topic, outs []output) {
 	used := map[string]bool{}
 	for i := range outs {
 		slug := slugify(strings.NewReplacer("[", "", "]", "").Replace(red.apply(outs[i].title)))
@@ -163,16 +199,18 @@ func run(args []string) int {
 		outs[i].note = filepath.Join(out, stamp+"-"+slug+".md")
 		outs[i].prompt = filepath.Join(out, stamp+"-"+slug+".prompt.md")
 	}
+}
 
-	if *dryRun {
-		for _, o := range outs {
-			if o.body != "" {
-				fmt.Printf("==> %s\n%s\n", o.note, o.body)
-			}
-			fmt.Printf("==> %s\n%s\n", o.prompt, o.transcript)
+func printAll(outs []output) {
+	for _, o := range outs {
+		if o.body != "" {
+			fmt.Printf("==> %s\n%s\n", o.note, o.body)
 		}
-		return 0
+		fmt.Printf("==> %s\n%s\n", o.prompt, o.transcript)
 	}
+}
+
+func writeFiles(out string, outs []output) ([]string, error) {
 	var targets []string
 	for _, o := range outs {
 		targets = append(targets, o.prompt)
@@ -182,41 +220,25 @@ func run(args []string) int {
 	}
 	for _, p := range targets {
 		if _, err := os.Stat(p); err == nil {
-			report(fmt.Errorf("%s already exists, so nothing was written. Move it aside, or check the output first with --dry-run", p))
-			return 1
+			return nil, fmt.Errorf("%s already exists, so nothing was written. Move it aside, or check the output first with --dry-run", p)
 		}
 	}
 	if err := os.MkdirAll(out, 0o755); err != nil {
-		report(err)
-		return 1
+		return nil, err
 	}
 	for _, o := range outs {
 		if err := os.WriteFile(o.prompt, []byte(o.transcript), 0o644); err != nil {
-			report(err)
-			return 1
+			return nil, err
 		}
 		if o.body == "" {
 			fmt.Fprintf(os.Stderr, "Write %s yourself.\n", o.note)
 			continue
 		}
 		if err := os.WriteFile(o.note, []byte(o.body), 0o644); err != nil {
-			report(err)
-			return 1
+			return nil, err
 		}
 	}
-	if *asJSON {
-		var notes []map[string]any
-		for _, o := range outs {
-			notes = append(notes, map[string]any{"note": o.note, "prompt": o.prompt, "noteWritten": o.body != ""})
-		}
-		json.NewEncoder(os.Stdout).Encode(map[string]any{"session": file, "notes": notes})
-		return 0
-	}
-	for _, p := range targets {
-		fmt.Println(p)
-	}
-	fmt.Fprintln(os.Stderr, "Read them before you publish: check names, numbers and the summary lines.")
-	return 0
+	return targets, nil
 }
 
 func reorder(args []string) []string {

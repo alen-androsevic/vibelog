@@ -2,9 +2,10 @@
 
 Go CLI, standard library only. README.md covers what it does, the flags and the transcript format.
 
-- `main.go`: flags, the output folder, writing the files.
-- `session.go`: reading the session JSONL, the transcript format, redaction, and the two calls to
-  `claude -p` (split into topics, draft a note).
+- `main.go`: flags, the output folder, naming and writing the files.
+- `session.go`: reading the session JSONL and the transcript format.
+- `redact.go`: the built-in redactions and `~/.config/vibelog/redact.txt`.
+- `claude.go`: the two calls to `claude -p` (split into topics, draft a note).
 
 The code has no comments; names and tests carry the meaning. Keep it that way.
 
